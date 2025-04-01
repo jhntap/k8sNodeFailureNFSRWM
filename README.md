@@ -19,7 +19,7 @@ Please note that while these samples have been tested in a specific environment,
 
 ### Test Steps for Force Detach Feature in Trident NFS Backend with ReadWriteMany Access Mode
 
-The following steps outline how to test the force detach feature of the Trident with iSCSI backend. This feature ensures that a Persistent Volume Claim (PVC) can be detached from a failed node and reattached to a healthy node, allowing the pod that uses the PVC to be rescheduled.
+The following steps outline how to test the force detach feature of the Trident with NFS backend with ReadWriteMany access mode. This feature ensures that a Persistent Volume Claim (PVC) can be detached from a failed node and reattached to a healthy node, allowing the pod that uses the PVC to be rescheduled.
 
 #### 1. Enable Force Detach on Trident (Optional - If Force Detach is disabled)
 Update Force Detach on Trident Orchestrator Custom Resource (torc) - This will restart Trident pods.
@@ -65,7 +65,8 @@ Apply the PVC definition to the Kubernetes cluster:
 
 ```
 # kubectl apply -f pvc-nfs-rwm.yaml
-persistentvolumeclaim/pvc-iscsi created
+persistentvolumeclaim/pvc-nfs-rwm created
+
 # kubectl get pvc -o wide
 NAME          STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS        VOLUMEATTRIBUTESCLASS   AGE   VOLUMEMODE
 pvc-nfs-rwm   Bound    pvc-76520289-76f0-498a-8165-f358829750c3   1Gi        RWX            storage-class-nfs   <unset>                 13s   Filesystem
@@ -235,27 +236,27 @@ csi-29d573214882e502742c2e079d8f50ec8842b018f96204ff9177591033f5ffc1   csi.tride
 csi-318e002ea6b1f3a8a5db0bcc837a699af1f65b596c800f98623819ad11101de2   csi.trident.netapp.io   pvc-76520289-76f0-498a-8165-f358829750c3   rhel3   true       31m
 csi-f8029c43dd1a903c9bebe82221b15837f2961a482f304ae597a7e4f24f19c863   csi.trident.netapp.io   pvc-76520289-76f0-498a-8165-f358829750c3   rhel2   true       31m
 
-# kubectl describe $(kubectl get pod -o name)
-Name:                      test-deployment-57fb685899-66wmp
+# kubectl describe pod test-deployment-66f546f986-6rw9n
+Name:                      test-deployment-66f546f986-6rw9n
 Namespace:                 default
 Priority:                  0
 Service Account:           default
 Node:                      rhel1/192.168.0.61
-Start Time:                Wed, 26 Mar 2025 02:27:10 +0000
+Start Time:                Tue, 01 Apr 2025 06:20:08 +0000
 Labels:                    app=test
-                           pod-template-hash=57fb685899
-Annotations:               cni.projectcalico.org/containerID: 1a109ecbe9d743329c23ab2b50ac14b15cfa913b58e60996cc4595d8293201d6
-                           cni.projectcalico.org/podIP: 192.168.26.9/32
-                           cni.projectcalico.org/podIPs: 192.168.26.9/32
-Status:                    Terminating (lasts 105s)
+                           pod-template-hash=66f546f986
+Annotations:               cni.projectcalico.org/containerID: 4d89ac04afdc6e94e16ee6e6cd24df327a7b885e9e212ce9c5feb35e56667d71
+                           cni.projectcalico.org/podIP: 192.168.26.14/32
+                           cni.projectcalico.org/podIPs: 192.168.26.14/32
+Status:                    Terminating (lasts 116s)
 Termination Grace Period:  30s
-IP:                        192.168.26.9
+IP:                        192.168.26.14
 IPs:
-  IP:           192.168.26.9
-Controlled By:  ReplicaSet/test-deployment-57fb685899
+  IP:           192.168.26.14
+Controlled By:  ReplicaSet/test-deployment-66f546f986
 Containers:
   alpine:
-    Container ID:  cri-o://1c42bb45f739f0a0918c0c7f73ac06cfb640cd1943295026f3c9b28ee2f902cf
+    Container ID:  cri-o://c9bbf93c9b838332c4ac8b484c46ebb70236bf5cb700d8ebb2914375c1557c91
     Image:         alpine:3.19.1
     Image ID:      docker.io/library/alpine@sha256:6457d53fb065d6f250e1504b9bc42d5b6c65941d57532c072d929dd0628977d0
     Port:          <none>
@@ -265,13 +266,13 @@ Containers:
       -c
       sleep 7d
     State:          Running
-      Started:      Wed, 26 Mar 2025 02:27:18 +0000
+      Started:      Tue, 01 Apr 2025 06:20:20 +0000
     Ready:          True
     Restart Count:  0
     Environment:    <none>
     Mounts:
-      /data from iscsi-vol (rw)
-      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-p4c6s (ro)
+      /data from nfs-vol (rw)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-fs4bb (ro)
 Conditions:
   Type                        Status
   PodReadyToStartContainers   True
@@ -281,11 +282,11 @@ Conditions:
   PodScheduled                True
   DisruptionTarget            True
 Volumes:
-  iscsi-vol:
+  nfs-vol:
     Type:       PersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)
-    ClaimName:  pvc-iscsi
+    ClaimName:  pvc-nfs-rwm
     ReadOnly:   false
-  kube-api-access-p4c6s:
+  kube-api-access-fs4bb:
     Type:                    Projected (a volume that contains injected data from multiple sources)
     TokenExpirationSeconds:  3607
     ConfigMapName:           kube-root-ca.crt
@@ -296,14 +297,14 @@ Node-Selectors:              kubernetes.io/os=linux
 Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 30s
                              node.kubernetes.io/unreachable:NoExecute op=Exists for 30s
 Events:
-  Type     Reason                  Age    From                     Message
-  ----     ------                  ----   ----                     -------
-  Normal   Scheduled               23m    default-scheduler        Successfully assigned default/test-deployment-57fb685899-66wmp to rhel1
-  Normal   SuccessfulAttachVolume  23m    attachdetach-controller  AttachVolume.Attach succeeded for volume "pvc-2a11e307-1582-4650-bde6-bb9c12e55661"
-  Normal   Pulled                  23m    kubelet                  Container image "alpine:3.19.1" already present on machine
-  Normal   Created                 23m    kubelet                  Created container alpine
-  Normal   Started                 23m    kubelet                  Started container alpine
-  Warning  NodeNotReady            2m51s  node-controller          Node is not ready
+  Type     Reason                  Age   From                     Message
+  ----     ------                  ----  ----                     -------
+  Normal   Scheduled               33m   default-scheduler        Successfully assigned default/test-deployment-66f546f986-6rw9n to rhel1
+  Normal   SuccessfulAttachVolume  33m   attachdetach-controller  AttachVolume.Attach succeeded for volume "pvc-76520289-76f0-498a-8165-f358829750c3"
+  Normal   Pulled                  32m   kubelet                  Container image "alpine:3.19.1" already present on machine
+  Normal   Created                 32m   kubelet                  Created container alpine
+  Normal   Started                 32m   kubelet                  Started container alpine
+  Warning  NodeNotReady            3m1s  node-controller          Node is not ready
 
 # kubectl describe pod test-deployment-66f546f986-vmwzc
 Name:             test-deployment-66f546f986-vmwzc
