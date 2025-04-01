@@ -17,7 +17,7 @@ All samples have been tested with the following environment:
 
 Please note that while these samples have been tested in a specific environment, they may need to be adjusted for use in other setups.
 
-### Test Steps for Force Detach Feature in Trident iSCSI Backend
+### Test Steps for Force Detach Feature in Trident NFS Backend with ReadWriteMany Access Mode
 
 The following steps outline how to test the force detach feature of the Trident with iSCSI backend. This feature ensures that a Persistent Volume Claim (PVC) can be detached from a failed node and reattached to a healthy node, allowing the pod that uses the PVC to be rescheduled.
 
@@ -64,11 +64,12 @@ spec:
 Apply the PVC definition to the Kubernetes cluster:
 
 ```
-# kubectl apply -f pvc-iscsi.yaml
+# kubectl apply -f pvc-nfs-rwm.yaml
 persistentvolumeclaim/pvc-iscsi created
 # kubectl get pvc -o wide
-NAME        STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS          VOLUMEATTRIBUTESCLASS   AGE   VOLUMEMODE
-pvc-iscsi   Bound    pvc-2a11e307-1582-4650-bde6-bb9c12e55661   2Gi        RWO            storage-class-iscsi   <unset>                 32s   Filesystem
+NAME          STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS        VOLUMEATTRIBUTESCLASS   AGE   VOLUMEMODE
+pvc-nfs-rwm   Bound    pvc-76520289-76f0-498a-8165-f358829750c3   1Gi        RWX            storage-class-nfs   <unset>                 13s   Filesystem
+
 ```
 
 #### 3. Create the deployment
@@ -83,7 +84,7 @@ metadata:
   labels:
     app: test
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app: test
@@ -93,9 +94,9 @@ spec:
         app: test
     spec:
       volumes:
-        - name: iscsi-vol
+        - name: nfs-vol
           persistentVolumeClaim:
-            claimName: pvc-iscsi
+            claimName: pvc-nfs-rwm
       containers:
       - name: alpine
         image: alpine:3.19.1
@@ -105,7 +106,7 @@ spec:
           - "sleep 7d"
         volumeMounts:
           - mountPath: "/data"
-            name: iscsi-vol
+            name: nfs-vol
       tolerations:
       - effect: NoExecute
         key: node.kubernetes.io/not-ready
@@ -126,53 +127,75 @@ Apply the deployment to the Kubernetes cluster:
 deployment.apps/test-deployment created
 # ./verify_status.sh
 kubectl get deployment.apps/test-deployment -o wide
-NAME              READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS   IMAGES          SELECTOR
-test-deployment   1/1     1            1           15m   alpine       alpine:3.19.1   app=test
-kubectl get replicaset.apps/test-deployment-57fb685899 -o wide
-NAME                         DESIRED   CURRENT   READY   AGE   CONTAINERS   IMAGES          SELECTOR
-test-deployment-57fb685899   1         1         1       15m   alpine       alpine:3.19.1   app=test,pod-template-hash=57fb685899
-kubectl get pod/test-deployment-57fb685899-66wmp -o wide
-NAME                               READY   STATUS    RESTARTS   AGE   IP             NODE    NOMINATED NODE   READINESS GATES
-test-deployment-57fb685899-66wmp   1/1     Running   0          15m   192.168.26.9   rhel1   <none>           <none>
-kubectl get persistentvolumeclaim/pvc-iscsi -o wide
-NAME        STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS          VOLUMEATTRIBUTESCLASS   AGE   VOLUMEMODE
-pvc-iscsi   Bound    pvc-2a11e307-1582-4650-bde6-bb9c12e55661   2Gi        RWO            storage-class-iscsi   <unset>                 98m   Filesystem
-kubectl get volumeattachment.storage.k8s.io/csi-da2b3538ecb54d57ccab422841bedb9516d5707ebe7656adc3b483d9901ef0a2 -o wide
+NAME              READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES          SELECTOR
+test-deployment   3/3     3            3           2m58s   alpine       alpine:3.19.1   app=test
+kubectl get replicaset.apps/test-deployment-66f546f986 -o wide
+NAME                         DESIRED   CURRENT   READY   AGE     CONTAINERS   IMAGES          SELECTOR
+test-deployment-66f546f986   3         3         3       2m58s   alpine       alpine:3.19.1   app=test,pod-template-hash=66f546f986
+kubectl get pod -o wide
+NAME                               READY   STATUS    RESTARTS   AGE     IP               NODE    NOMINATED NODE   READINESS GATES
+test-deployment-66f546f986-57kkl   1/1     Running   0          2m58s   192.168.25.107   rhel3   <none>           <none>
+test-deployment-66f546f986-6rw9n   1/1     Running   0          2m58s   192.168.26.14    rhel1   <none>           <none>
+test-deployment-66f546f986-sdfgt   1/1     Running   0          2m58s   192.168.28.67    rhel2   <none>           <none>
+kubectl get persistentvolumeclaim/pvc-nfs-rwm -o wide
+NAME          STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS        VOLUMEATTRIBUTESCLASS   AGE     VOLUMEMODE
+pvc-nfs-rwm   Bound    pvc-76520289-76f0-498a-8165-f358829750c3   1Gi        RWX            storage-class-nfs   <unset>                 4m27s   Filesystem
+kubectl get volumeattachments -o wide
 NAME                                                                   ATTACHER                PV                                         NODE    ATTACHED   AGE
-csi-da2b3538ecb54d57ccab422841bedb9516d5707ebe7656adc3b483d9901ef0a2   csi.trident.netapp.io   pvc-2a11e307-1582-4650-bde6-bb9c12e55661   rhel1   true       15m
+csi-29d573214882e502742c2e079d8f50ec8842b018f96204ff9177591033f5ffc1   csi.trident.netapp.io   pvc-76520289-76f0-498a-8165-f358829750c3   rhel1   true       2m58s
+csi-318e002ea6b1f3a8a5db0bcc837a699af1f65b596c800f98623819ad11101de2   csi.trident.netapp.io   pvc-76520289-76f0-498a-8165-f358829750c3   rhel3   true       2m58s
+csi-f8029c43dd1a903c9bebe82221b15837f2961a482f304ae597a7e4f24f19c863   csi.trident.netapp.io   pvc-76520289-76f0-498a-8165-f358829750c3   rhel2   true       2m58s
 ```
 
-Identify the node running the pod from the deployment.
+Identify the status of nodes running the pod from the deployment.
 
 ```
 # kubectl get pod -o wide
-NAME                               READY   STATUS    RESTARTS   AGE   IP             NODE    NOMINATED NODE   READINESS GATES
-test-deployment-57fb685899-66wmp   1/1     Running   0          16m   192.168.26.9   rhel1   <none>           <none>
+NAME                               READY   STATUS    RESTARTS   AGE     IP               NODE    NOMINATED NODE   READINESS GATES
+test-deployment-66f546f986-57kkl   1/1     Running   0          2m58s   192.168.25.107   rhel3   <none>           <none>
+test-deployment-66f546f986-6rw9n   1/1     Running   0          2m58s   192.168.26.14    rhel1   <none>           <none>
+test-deployment-66f546f986-sdfgt   1/1     Running   0          2m58s   192.168.28.67    rhel2   <none>           <none>
 
 # kubectl get node -o wide
 NAME    STATUS   ROLES           AGE    VERSION   INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                              KERNEL-VERSION                 CONTAINER-RUNTIME
-rhel1   Ready    <none>          332d   v1.29.4   192.168.0.61   <none>        Red Hat Enterprise Linux 9.3 (Plow)   5.14.0-362.24.1.el9_3.x86_64   cri-o://1.30.0
-rhel2   Ready    <none>          332d   v1.29.4   192.168.0.62   <none>        Red Hat Enterprise Linux 9.3 (Plow)   5.14.0-362.24.1.el9_3.x86_64   cri-o://1.30.0
-rhel3   Ready    control-plane   332d   v1.29.4   192.168.0.63   <none>        Red Hat Enterprise Linux 9.3 (Plow)   5.14.0-362.24.1.el9_3.x86_64   cri-o://1.30.0
+rhel1   Ready    <none>          338d   v1.29.4   192.168.0.61   <none>        Red Hat Enterprise Linux 9.3 (Plow)   5.14.0-362.24.1.el9_3.x86_64   cri-o://1.30.0
+rhel2   Ready    <none>          338d   v1.29.4   192.168.0.62   <none>        Red Hat Enterprise Linux 9.3 (Plow)   5.14.0-362.24.1.el9_3.x86_64   cri-o://1.30.0
+rhel3   Ready    control-plane   338d   v1.29.4   192.168.0.63   <none>        Red Hat Enterprise Linux 9.3 (Plow)   5.14.0-362.24.1.el9_3.x86_64   cri-o://1.30.0
+
+# tridentctl get node rhel1 -o yaml -n trident | grep publicationState
+  publicationState: clean
+# tridentctl get node rhel2 -o yaml -n trident | grep publicationState
+  publicationState: clean
+# tridentctl get node rhel3 -o yaml -n trident | grep publicationState
+  publicationState: clean
 ```
 
-Verify iSCSI PVC attachment to the node.
+Verify NFS PVC attachment to the node.
 
 ```
-[root@rhel1 ~]# multipath -ll
-3600a0980774f6a34712b572d41767174 dm-3 NETAPP,LUN C-Mode
-size=2.0G features='3 queue_if_no_path pg_init_retries 50' hwhandler='1 alua' wp=rw
-`-+- policy='service-time 0' prio=50 status=active
-  |- 34:0:0:0 sdb 8:16 active ready running
-  `- 33:0:0:0 sdc 8:32 active ready running
-[root@rhel1 ~]# lsscsi
-[0:0:0:0]    disk    VMware   Virtual disk     2.0   /dev/sda
-[3:0:0:0]    cd/dvd  NECVMWar VMware SATA CD00 1.00  /dev/sr0
-[33:0:0:0]   disk    NETAPP   LUN C-Mode       9141  /dev/sdc
-[34:0:0:0]   disk    NETAPP   LUN C-Mode       9141  /dev/sdb
-[root@rhel1 ~]# iscsiadm -m session
-tcp: [1] 192.168.0.135:3260,1030 iqn.1992-08.com.netapp:sn.7c8b4c9af76e11ee8aac005056b0f629:vs.4 (non-flash)
-tcp: [2] 192.168.0.136:3260,1031 iqn.1992-08.com.netapp:sn.7c8b4c9af76e11ee8aac005056b0f629:vs.4 (non-flash)
+# ssh root@rhel1 mount | grep 192.168.0.131
+192.168.0.131:/trident_pvc_76520289_76f0_498a_8165_f358829750c3 on /var/lib/kubelet/pods/e8264098-47be-49c1-ac50-110556264212/volumes/kubernetes.io~csi/pvc-76520289-76f0-498a-8165-f358829750c3/mount type nfs4 (rw,relatime,vers=4.2,rsize=65536,wsize=65536,namlen=255,hard,proto=tcp,timeo=600,retrans=2,sec=sys,clientaddr=192.168.0.61,local_lock=none,addr=192.168.0.131)
+# ssh root@rhel2 mount | grep 192.168.0.131
+192.168.0.131:/trident_pvc_76520289_76f0_498a_8165_f358829750c3 on /var/lib/kubelet/pods/e68aabbb-1966-425d-8116-a99f1107e6ed/volumes/kubernetes.io~csi/pvc-76520289-76f0-498a-8165-f358829750c3/mount type nfs4 (rw,relatime,vers=4.2,rsize=65536,wsize=65536,namlen=255,hard,proto=tcp,timeo=600,retrans=2,sec=sys,clientaddr=192.168.0.62,local_lock=none,addr=192.168.0.131)
+# ssh root@rhel3 mount | grep 192.168.0.131
+192.168.0.131:/trident_pvc_76520289_76f0_498a_8165_f358829750c3 on /var/lib/kubelet/pods/0560bcda-08e8-497f-b8bf-b0a8aac0a39d/volumes/kubernetes.io~csi/pvc-76520289-76f0-498a-8165-f358829750c3/mount type nfs4 (rw,relatime,vers=4.2,rsize=65536,wsize=65536,namlen=255,hard,proto=tcp,timeo=600,retrans=2,sec=sys,clientaddr=192.168.0.63,local_lock=none,addr=192.168.0.131)
+
+# nfs connected-clients show
+
+     Node: cluster1-01
+  Vserver: nassvm
+  Data-Ip: 192.168.0.131
+Client-Ip      Protocol Volume    Policy   Idle-Time    Local-Reqs Remote-Reqs
+-------------- -------- --------- -------- ------------ ---------- ----------
+Trunking
+-------
+192.168.0.61   nfs4.2   nassvm_root default 26m 54s     9        0     false
+192.168.0.61   nfs4.2   trident_pvc_76520289_76f0_498a_8165_f358829750c3 trident_pvc_76520289_76f0_498a_8165_f358829750c3 46s 42    0 false
+192.168.0.62   nfs4.2   nassvm_root default 26m 58s     9        0     false
+192.168.0.62   nfs4.2   trident_pvc_76520289_76f0_498a_8165_f358829750c3 trident_pvc_76520289_76f0_498a_8165_f358829750c3 1m 22s 43    0 false
+192.168.0.63   nfs4.2   nassvm_root default 26m 58s     9        0     false
+192.168.0.63   nfs4.2   trident_pvc_76520289_76f0_498a_8165_f358829750c3 trident_pvc_76520289_76f0_498a_8165_f358829750c3 2s 44    0 false
+6 entries were displayed.
 ```
 
 #### 4. Shutdown Node Running the Pod
@@ -186,28 +209,31 @@ Chech the status of the pod.
 ```
 # kubectl get node
 NAME    STATUS     ROLES           AGE    VERSION
-rhel1   NotReady   <none>          332d   v1.29.4
-rhel2   Ready      <none>          332d   v1.29.4
-rhel3   Ready      control-plane   332d   v1.29.4
+rhel1   NotReady   <none>          338d   v1.29.4
+rhel2   Ready      <none>          338d   v1.29.4
+rhel3   Ready      control-plane   338d   v1.29.4
 
 # ./verify_status.sh
 kubectl get deployment.apps/test-deployment -o wide
 NAME              READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS   IMAGES          SELECTOR
-test-deployment   0/1     1            0           22m   alpine       alpine:3.19.1   app=test
-kubectl get replicaset.apps/test-deployment-57fb685899 -o wide
+test-deployment   3/3     3            3           31m   alpine       alpine:3.19.1   app=test
+kubectl get replicaset.apps/test-deployment-66f546f986 -o wide
 NAME                         DESIRED   CURRENT   READY   AGE   CONTAINERS   IMAGES          SELECTOR
-test-deployment-57fb685899   1         1         0       22m   alpine       alpine:3.19.1   app=test,pod-template-hash=57fb685899
-kubectl get pod/test-deployment-57fb685899-66wmp
-pod/test-deployment-57fb685899-6wg56 -o wide
-NAME                               READY   STATUS              RESTARTS   AGE   IP             NODE    NOMINATED NODE   READINESS GATES
-test-deployment-57fb685899-66wmp   1/1     Terminating         0          22m   192.168.26.9   rhel1   <none>           <none>
-test-deployment-57fb685899-6wg56   0/1     ContainerCreating   0          54s   <none>         rhel3   <none>           <none>
-kubectl get persistentvolumeclaim/pvc-iscsi -o wide
-NAME        STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS          VOLUMEATTRIBUTESCLASS   AGE    VOLUMEMODE
-pvc-iscsi   Bound    pvc-2a11e307-1582-4650-bde6-bb9c12e55661   2Gi        RWO            storage-class-iscsi   <unset>                 105m   Filesystem
-kubectl get volumeattachment.storage.k8s.io/csi-da2b3538ecb54d57ccab422841bedb9516d5707ebe7656adc3b483d9901ef0a2 -o wide
+test-deployment-66f546f986   3         3         3       31m   alpine       alpine:3.19.1   app=test,pod-template-hash=66f546f986
+kubectl get pod -o wide
+NAME                               READY   STATUS        RESTARTS   AGE   IP               NODE    NOMINATED NODE   READINESS GATES
+test-deployment-66f546f986-57kkl   1/1     Running       0          31m   192.168.25.107   rhel3   <none>           <none>
+test-deployment-66f546f986-6rw9n   1/1     Terminating   0          31m   192.168.26.14    rhel1   <none>           <none>
+test-deployment-66f546f986-sdfgt   1/1     Running       0          31m   192.168.28.67    rhel2   <none>           <none>
+test-deployment-66f546f986-vmwzc   1/1     Running       0          63s   192.168.28.127   rhel2   <none>           <none>
+kubectl get persistentvolumeclaim/pvc-nfs-rwm -o wide
+NAME          STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS        VOLUMEATTRIBUTESCLASS   AGE   VOLUMEMODE
+pvc-nfs-rwm   Bound    pvc-76520289-76f0-498a-8165-f358829750c3   1Gi        RWX            storage-class-nfs   <unset>                 33m   Filesystem
+kubectl get volumeattachments -o wide
 NAME                                                                   ATTACHER                PV                                         NODE    ATTACHED   AGE
-csi-da2b3538ecb54d57ccab422841bedb9516d5707ebe7656adc3b483d9901ef0a2   csi.trident.netapp.io   pvc-2a11e307-1582-4650-bde6-bb9c12e55661   rhel1   true       22m
+csi-29d573214882e502742c2e079d8f50ec8842b018f96204ff9177591033f5ffc1   csi.trident.netapp.io   pvc-76520289-76f0-498a-8165-f358829750c3   rhel1   true       31m
+csi-318e002ea6b1f3a8a5db0bcc837a699af1f65b596c800f98623819ad11101de2   csi.trident.netapp.io   pvc-76520289-76f0-498a-8165-f358829750c3   rhel3   true       31m
+csi-f8029c43dd1a903c9bebe82221b15837f2961a482f304ae597a7e4f24f19c863   csi.trident.netapp.io   pvc-76520289-76f0-498a-8165-f358829750c3   rhel2   true       31m
 
 # kubectl describe $(kubectl get pod -o name)
 Name:                      test-deployment-57fb685899-66wmp
@@ -279,52 +305,55 @@ Events:
   Normal   Started                 23m    kubelet                  Started container alpine
   Warning  NodeNotReady            2m51s  node-controller          Node is not ready
 
-
-Name:             test-deployment-57fb685899-6wg56
+# kubectl describe pod test-deployment-66f546f986-vmwzc
+Name:             test-deployment-66f546f986-vmwzc
 Namespace:        default
 Priority:         0
 Service Account:  default
-Node:             rhel3/192.168.0.63
-Start Time:       Wed, 26 Mar 2025 02:48:22 +0000
+Node:             rhel2/192.168.0.62
+Start Time:       Tue, 01 Apr 2025 06:50:47 +0000
 Labels:           app=test
-                  pod-template-hash=57fb685899
-Annotations:      <none>
-Status:           Pending
-IP:
-IPs:              <none>
-Controlled By:    ReplicaSet/test-deployment-57fb685899
+                  pod-template-hash=66f546f986
+Annotations:      cni.projectcalico.org/containerID: c2e98a475997972ae0811182662aca674765b0c6a421272411fbcce3d7e5564f
+                  cni.projectcalico.org/podIP: 192.168.28.127/32
+                  cni.projectcalico.org/podIPs: 192.168.28.127/32
+Status:           Running
+IP:               192.168.28.127
+IPs:
+  IP:           192.168.28.127
+Controlled By:  ReplicaSet/test-deployment-66f546f986
 Containers:
   alpine:
-    Container ID:
+    Container ID:  cri-o://c21a9fc807af2cc617541e5a816ed37c8f588b349c61ac324a4d67a20d99dc9e
     Image:         alpine:3.19.1
-    Image ID:
+    Image ID:      docker.io/library/alpine@sha256:6457d53fb065d6f250e1504b9bc42d5b6c65941d57532c072d929dd0628977d0
     Port:          <none>
     Host Port:     <none>
     Command:
       /bin/sh
       -c
       sleep 7d
-    State:          Waiting
-      Reason:       ContainerCreating
-    Ready:          False
+    State:          Running
+      Started:      Tue, 01 Apr 2025 06:50:48 +0000
+    Ready:          True
     Restart Count:  0
     Environment:    <none>
     Mounts:
-      /data from iscsi-vol (rw)
-      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-nhlgb (ro)
+      /data from nfs-vol (rw)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-9dkb2 (ro)
 Conditions:
   Type                        Status
-  PodReadyToStartContainers   False
+  PodReadyToStartContainers   True
   Initialized                 True
-  Ready                       False
-  ContainersReady             False
+  Ready                       True
+  ContainersReady             True
   PodScheduled                True
 Volumes:
-  iscsi-vol:
+  nfs-vol:
     Type:       PersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)
-    ClaimName:  pvc-iscsi
+    ClaimName:  pvc-nfs-rwm
     ReadOnly:   false
-  kube-api-access-nhlgb:
+  kube-api-access-9dkb2:
     Type:                    Projected (a volume that contains injected data from multiple sources)
     TokenExpirationSeconds:  3607
     ConfigMapName:           kube-root-ca.crt
@@ -335,10 +364,12 @@ Node-Selectors:              kubernetes.io/os=linux
 Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 30s
                              node.kubernetes.io/unreachable:NoExecute op=Exists for 30s
 Events:
-  Type     Reason              Age    From                     Message
-  ----     ------              ----   ----                     -------
-  Normal   Scheduled           2m15s  default-scheduler        Successfully assigned default/test-deployment-57fb685899-6wg56 to rhel3
-  Warning  FailedAttachVolume  2m15s  attachdetach-controller  Multi-Attach error for volume "pvc-2a11e307-1582-4650-bde6-bb9c12e55661" Volume is already used by pod(s) test-deployment-57fb685899-66wmp
+  Type    Reason     Age    From               Message
+  ----    ------     ----   ----               -------
+  Normal  Scheduled  3m35s  default-scheduler  Successfully assigned default/test-deployment-66f546f986-vmwzc to rhel2
+  Normal  Pulled     3m32s  kubelet            Container image "alpine:3.19.1" already present on machine
+  Normal  Created    3m32s  kubelet            Created container alpine
+  Normal  Started    3m32s  kubelet            Started container alpine
 ```
 
 #### 5. Apply Taint to the Failed Node
@@ -359,12 +390,12 @@ node/rhel1 tainted
     {
       "effect": "NoSchedule",
       "key": "node.kubernetes.io/unreachable",
-      "timeAdded": "2025-03-26T02:47:46Z"
+      "timeAdded": "2025-04-01T06:50:10Z"
     },
     {
       "effect": "NoExecute",
       "key": "node.kubernetes.io/unreachable",
-      "timeAdded": "2025-03-26T02:47:52Z"
+      "timeAdded": "2025-04-01T06:50:15Z"
     }
   ]
 }
@@ -377,73 +408,76 @@ node/rhel1 tainted
   "taints": null
 }
 
-# tridentctl get node rhel1 -n trident -o yaml
-items:
-- deleted: false
-  hostInfo:
-    os:
-      distro: rhel
-      release: "9.3"
-      version: "9.3"
-    services:
-    - NFS
-    - iSCSI
-    - nvme
-  ips:
-  - 192.168.0.61
-  - 192.168.26.0
-  iqn: iqn.1994-05.com.redhat:rhel1.demo.netapp.com
-  logLayers: ""
-  logLevel: ""
-  logWorkflows: ""
-  name: rhel1
-  nodePrep:
-    enabled: false
-  nqn: nqn.2014-08.org.nvmexpress:uuid:541e3042-2619-c021-eb5f-e0e73e5d2210
+# tridentctl get node rhel1 -o yaml -n trident | grep publicationState
   publicationState: dirty
+# tridentctl get node rhel2 -o yaml -n trident | grep publicationState
+  publicationState: clean
+# tridentctl get node rhel3 -o yaml -n trident | grep publicationState
+  publicationState: clean
 ```
 
-#### 6. Verify iSCSI PVC Detachment and Pod Rescheduling
+#### 6. Verify PVC Detachment from the Failed Node
 
-Verify that the pod has been rescheduled onto another node and that it has successfully mounted the iSCSI PVC.
+Verify that the pod has been rescheduled onto another node and that it has successfully mounted the NFS PVC.
 
 ```
-# ./verify_status.sh                                                                 kubectl get deployment.apps/test-deployment -o wide
+# ./verify_status.sh
+kubectl get deployment.apps/test-deployment -o wide
 NAME              READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS   IMAGES          SELECTOR
-test-deployment   1/1     1            1           26m   alpine       alpine:3.19.1   app=test
-kubectl get replicaset.apps/test-deployment-57fb685899 -o wide
+test-deployment   3/3     3            3           37m   alpine       alpine:3.19.1   app=test
+kubectl get replicaset.apps/test-deployment-66f546f986 -o wide
 NAME                         DESIRED   CURRENT   READY   AGE   CONTAINERS   IMAGES          SELECTOR
-test-deployment-57fb685899   1         1         1       26m   alpine       alpine:3.19.1   app=test,pod-template-hash=57fb685899
-kubectl get pod/test-deployment-57fb685899-6wg56 -o wide
+test-deployment-66f546f986   3         3         3       37m   alpine       alpine:3.19.1   app=test,pod-template-hash=66f546f986
+kubectl get pod -o wide
 NAME                               READY   STATUS    RESTARTS   AGE     IP               NODE    NOMINATED NODE   READINESS GATES
-test-deployment-57fb685899-6wg56   1/1     Running   0          5m39s   192.168.25.105   rhel3   <none>           <none>
-kubectl get persistentvolumeclaim/pvc-iscsi -o wide
-NAME        STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS          VOLUMEATTRIBUTESCLASS   AGE    VOLUMEMODE
-pvc-iscsi   Bound    pvc-2a11e307-1582-4650-bde6-bb9c12e55661   2Gi        RWO            storage-class-iscsi   <unset>                 110m   Filesystem
-kubectl get volumeattachment.storage.k8s.io/csi-67f0ffca2611b7a2ff5c5ac2d8247cafd31b113ae4689799d5bcd210f3ea791b -o wide
+test-deployment-66f546f986-57kkl   1/1     Running   0          37m     192.168.25.107   rhel3   <none>           <none>
+test-deployment-66f546f986-sdfgt   1/1     Running   0          37m     192.168.28.67    rhel2   <none>           <none>
+test-deployment-66f546f986-vmwzc   1/1     Running   0          6m56s   192.168.28.127   rhel2   <none>           <none>
+kubectl get persistentvolumeclaim/pvc-nfs-rwm -o wide
+NAME          STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS        VOLUMEATTRIBUTESCLASS   AGE   VOLUMEMODE
+pvc-nfs-rwm   Bound    pvc-76520289-76f0-498a-8165-f358829750c3   1Gi        RWX            storage-class-nfs   <unset>                 39m   Filesystem
+kubectl get volumeattachments -o wide
 NAME                                                                   ATTACHER                PV                                         NODE    ATTACHED   AGE
-csi-67f0ffca2611b7a2ff5c5ac2d8247cafd31b113ae4689799d5bcd210f3ea791b   csi.trident.netapp.io   pvc-2a11e307-1582-4650-bde6-bb9c12e55661   rhel3   true       30s
+csi-318e002ea6b1f3a8a5db0bcc837a699af1f65b596c800f98623819ad11101de2   csi.trident.netapp.io   pvc-76520289-76f0-498a-8165-f358829750c3   rhel3   true       37m
+csi-f8029c43dd1a903c9bebe82221b15837f2961a482f304ae597a7e4f24f19c863   csi.trident.netapp.io   pvc-76520289-76f0-498a-8165-f358829750c3   rhel2   true       37m
 
-# kubectl describe $(kubectl get pod -o name)
-Name:             test-deployment-57fb685899-6wg56
+# nfs connected-clients show
+
+     Node: cluster1-01
+  Vserver: nassvm
+  Data-Ip: 192.168.0.131
+Client-Ip      Protocol Volume    Policy   Idle-Time    Local-Reqs Remote-Reqs
+-------------- -------- --------- -------- ------------ ---------- ----------
+Trunking
+-------
+192.168.0.61   nfs4.2   nassvm_root default 38m 40s     9        0     false
+192.168.0.61   nfs4.2   trident_pvc_76520289_76f0_498a_8165_f358829750c3 trident_pvc_76520289_76f0_498a_8165_f358829750c3 10m 34s 44    0 false
+192.168.0.62   nfs4.2   nassvm_root default 8m 13s      18       0     false
+192.168.0.62   nfs4.2   trident_pvc_76520289_76f0_498a_8165_f358829750c3 trident_pvc_76520289_76f0_498a_8165_f358829750c3 9s 73    0 false
+192.168.0.63   nfs4.2   nassvm_root default 38m 44s     9        0     false
+192.168.0.63   nfs4.2   trident_pvc_76520289_76f0_498a_8165_f358829750c3 trident_pvc_76520289_76f0_498a_8165_f358829750c3 53s 60    0 false
+6 entries were displayed.
+
+# kubectl describe pod test-deployment-66f546f986-vmwzc
+Name:             test-deployment-66f546f986-vmwzc
 Namespace:        default
 Priority:         0
 Service Account:  default
-Node:             rhel3/192.168.0.63
-Start Time:       Wed, 26 Mar 2025 02:48:22 +0000
+Node:             rhel2/192.168.0.62
+Start Time:       Tue, 01 Apr 2025 06:50:47 +0000
 Labels:           app=test
-                  pod-template-hash=57fb685899
-Annotations:      cni.projectcalico.org/containerID: 34807da8f943264dac95d434bd7a74aed40f4cea9b2576f2bc0b69855feb58a8
-                  cni.projectcalico.org/podIP: 192.168.25.105/32
-                  cni.projectcalico.org/podIPs: 192.168.25.105/32
+                  pod-template-hash=66f546f986
+Annotations:      cni.projectcalico.org/containerID: c2e98a475997972ae0811182662aca674765b0c6a421272411fbcce3d7e5564f
+                  cni.projectcalico.org/podIP: 192.168.28.127/32
+                  cni.projectcalico.org/podIPs: 192.168.28.127/32
 Status:           Running
-IP:               192.168.25.105
+IP:               192.168.28.127
 IPs:
-  IP:           192.168.25.105
-Controlled By:  ReplicaSet/test-deployment-57fb685899
+  IP:           192.168.28.127
+Controlled By:  ReplicaSet/test-deployment-66f546f986
 Containers:
   alpine:
-    Container ID:  cri-o://ac56f468141e1735559e6f57809b719aecdbcbe3c8634b0e3149886ae9abd59e
+    Container ID:  cri-o://c21a9fc807af2cc617541e5a816ed37c8f588b349c61ac324a4d67a20d99dc9e
     Image:         alpine:3.19.1
     Image ID:      docker.io/library/alpine@sha256:6457d53fb065d6f250e1504b9bc42d5b6c65941d57532c072d929dd0628977d0
     Port:          <none>
@@ -453,13 +487,13 @@ Containers:
       -c
       sleep 7d
     State:          Running
-      Started:      Wed, 26 Mar 2025 02:53:34 +0000
+      Started:      Tue, 01 Apr 2025 06:50:48 +0000
     Ready:          True
     Restart Count:  0
     Environment:    <none>
     Mounts:
-      /data from iscsi-vol (rw)
-      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-nhlgb (ro)
+      /data from nfs-vol (rw)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-9dkb2 (ro)
 Conditions:
   Type                        Status
   PodReadyToStartContainers   True
@@ -468,11 +502,11 @@ Conditions:
   ContainersReady             True
   PodScheduled                True
 Volumes:
-  iscsi-vol:
+  nfs-vol:
     Type:       PersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)
-    ClaimName:  pvc-iscsi
+    ClaimName:  pvc-nfs-rwm
     ReadOnly:   false
-  kube-api-access-nhlgb:
+  kube-api-access-9dkb2:
     Type:                    Projected (a volume that contains injected data from multiple sources)
     TokenExpirationSeconds:  3607
     ConfigMapName:           kube-root-ca.crt
@@ -483,28 +517,12 @@ Node-Selectors:              kubernetes.io/os=linux
 Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 30s
                              node.kubernetes.io/unreachable:NoExecute op=Exists for 30s
 Events:
-  Type     Reason                  Age    From                     Message
-  ----     ------                  ----   ----                     -------
-  Normal   Scheduled               6m58s  default-scheduler        Successfully assigned default/test-deployment-57fb685899-6wg56 to rhel3
-  Warning  FailedAttachVolume      6m58s  attachdetach-controller  Multi-Attach error for volume "pvc-2a11e307-1582-4650-bde6-bb9c12e55661" Volume is already used by pod(s) test-deployment-57fb685899-66wmp
-  Normal   SuccessfulAttachVolume  108s   attachdetach-controller  AttachVolume.Attach succeeded for volume "pvc-2a11e307-1582-4650-bde6-bb9c12e55661"
-  Normal   Pulled                  106s   kubelet                  Container image "alpine:3.19.1" already present on machine
-  Normal   Created                 106s   kubelet                  Created container alpine
-  Normal   Started                 106s   kubelet                  Started container alpine
-```
-
-Verify iSCSI PVC attachment to the healthy node
-
-```
-[root@rhel3 ~]# multipath -ll
-3600a0980774f6a34712b572d41767174 dm-3 NETAPP,LUN C-Mode
-size=2.0G features='3 queue_if_no_path pg_init_retries 50' hwhandler='1 alua' wp=rw
-`-+- policy='service-time 0' prio=50 status=active
-  |- 34:0:0:0 sdb 8:16 active ready running
-  `- 33:0:0:0 sdc 8:32 active ready running
-[root@rhel3 ~]# iscsiadm -m session
-tcp: [1] 192.168.0.135:3260,1030 iqn.1992-08.com.netapp:sn.7c8b4c9af76e11ee8aac005056b0f629:vs.4 (non-flash)
-tcp: [2] 192.168.0.136:3260,1031 iqn.1992-08.com.netapp:sn.7c8b4c9af76e11ee8aac005056b0f629:vs.4 (non-flash)
+  Type    Reason     Age   From               Message
+  ----    ------     ----  ----               -------
+  Normal  Scheduled  20m   default-scheduler  Successfully assigned default/test-deployment-66f546f986-vmwzc to rhel2
+  Normal  Pulled     20m   kubelet            Container image "alpine:3.19.1" already present on machine
+  Normal  Created    20m   kubelet            Created container alpine
+  Normal  Started    20m   kubelet            Started container alpine
 ```
 
 #### 8. Verify Trident Node State after Recovery (Optional)
@@ -514,12 +532,12 @@ Power up the failed node and verify the node is in Ready state
 ```
 # kubectl get node
 NAME    STATUS   ROLES           AGE    VERSION
-rhel1   Ready    <none>          332d   v1.29.4
-rhel2   Ready    <none>          332d   v1.29.4
-rhel3   Ready    control-plane   332d   v1.29.4
+rhel1   Ready    <none>          338d   v1.29.4
+rhel2   Ready    <none>          338d   v1.29.4
+rhel3   Ready    control-plane   338d   v1.29.4
 ```
 
-Remove the taint and verify the Trident node state is Cleanable state
+Remove the taint and verify the Trident node state is Clean state
 
 ```
 # kubectl taint nodes rhel1 node.kubernetes.io/out-of-service=nodeshutdown:NoExecute-
@@ -539,32 +557,32 @@ node/rhel1 untainted
   "taints": null
 }
 
-# tridentctl get node rhel1 -n trident -o yaml
-items:
-- deleted: false
-  hostInfo:
-    os:
-      distro: rhel
-      release: "9.3"
-      version: "9.3"
-    services:
-    - iSCSI
-    - nvme
-  ips:
-  - 192.168.0.61
-  - 192.168.26.0
-  iqn: iqn.1994-05.com.redhat:rhel1.demo.netapp.com
-  logLayers: ""
-  logLevel: info
-  logWorkflows: ""
-  name: rhel1
-  nqn: nqn.2014-08.org.nvmexpress:uuid:541e3042-2619-c021-eb5f-e0e73e5d2210
-  publicationState: cleanable
-  topologyLabels:
-    topology.kubernetes.io/region: west
-    topology.kubernetes.io/zone: west1
+#  tridentctl get node rhel1 -o yaml -n trident | grep publicationState
+  publicationState: clean
+#  tridentctl get node rhel2 -o yaml -n trident | grep publicationState
+  publicationState: clean
+#  tridentctl get node rhel3 -o yaml -n trident | grep publicationState
+  publicationState: clean
 ```
 
+#### 9. Redistribute the Pod Manually (Optional)
+
+```
+# k get pod -o wide
+NAME                               READY   STATUS    RESTARTS   AGE   IP               NODE    NOMINATED NODE   READINESS GATES
+test-deployment-66f546f986-57kkl   1/1     Running   0          66m   192.168.25.107   rhel3   <none>           <none>
+test-deployment-66f546f986-sdfgt   1/1     Running   0          66m   192.168.28.67    rhel2   <none>           <none>
+test-deployment-66f546f986-vmwzc   1/1     Running   0          35m   192.168.28.127   rhel2   <none>           <none>
+
+# kubectl delete pod test-deployment-66f546f986-vmwzc
+pod "test-deployment-66f546f986-vmwzc" deleted
+
+# kubectl get pod -o wide
+NAME                               READY   STATUS    RESTARTS   AGE   IP               NODE    NOMINATED NODE   READINESS GATES
+test-deployment-66f546f986-57kkl   1/1     Running   0          68m   192.168.25.107   rhel3   <none>           <none>
+test-deployment-66f546f986-lhgvn   1/1     Running   0          41s   192.168.26.15    rhel1   <none>           <none>
+test-deployment-66f546f986-sdfgt   1/1     Running   0          68m   192.168.28.67    rhel2   <none>           <none>
+```
 
 
 
